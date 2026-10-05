@@ -1,11 +1,11 @@
 # Runtime dependencies, pinned to exact versions so builds are reproducible
 # and a compromised new release can't slip in silently.
-fastapi==0.141.1
+fastapi==0.142.2
 # Email syntax validation for pydantic's EmailStr.
 email-validator==2.3.0
-uvicorn==0.53.0
+uvicorn==0.54.0
 pydantic-settings==2.15.0
-psycopg[binary]==3.3.5
-psycopg-pool==3.3.1
+psycopg[binary]==3.3.6
+psycopg-pool==3.3.3
 redis==8.1.0
 argon2-cffi==25.1.0
