@@ -1,0 +1,176 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Least privilege: this workflow only reads the repository. The default GITHUB_TOKEN
+# is read/write unless narrowed, so a compromised dependency in a build step could
+# otherwise push commits or publish releases.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    # The security guarantees under test live partly in the database and in Redis
+    # (UNIQUE on citext, CHECK constraints, SET XX / GETDEL / WATCH semantics), so
+    # the suite runs against real services rather than mocks.
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: postgres
+          # CI-only credential for a container that exists for the length of this job
+          # and is not reachable from outside the runner.
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: auth
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      ENVIRONMENT: test
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/auth
+      REDIS_URL: redis://localhost:6379/0
+      # Enables the PostgreSQL tests. Without this the fixtures skip them, so it is set
+      # explicitly and the skip guard below makes sure they really ran.
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/auth_test
+      # Enables the session tests against a real Redis, not just fakeredis.
+      TEST_REDIS_URL: redis://localhost:6379/15
+
+    steps:
+      # Pinning actions to a commit SHA rather than a tag is stronger (a tag can be
+      # moved to new code); tracked as a Phase 4 supply-chain item alongside hash-locked
+      # Python dependencies.
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      # Service containers do not run the scripts in db/init, so the disposable test
+      # database that docker-entrypoint-initdb.d creates locally has to be made here.
+      # Without it, every PostgreSQL test would skip and CI would pass on a subset.
+      - name: Create the test database
+        env:
+          PGPASSWORD: postgres
+        run: psql -h localhost -U postgres -c 'CREATE DATABASE auth_test;'
+
+      - name: Run the test suite
+        shell: bash
+        run: |
+          # pipefail matters: GitHub's default shell does not set it, so without this
+          # the exit code of `tee` would hide a failing pytest run and CI would pass.
+          set -o pipefail
+          python -m pytest -q | tee pytest-output.txt
+
+      # A green check on a partial run is worse than a red one, so a skip fails the build.
+      - name: Fail if any test was skipped
+        run: |
+          if grep -qiE '[0-9]+ skipped' pytest-output.txt; then
+            echo "::error::Tests were skipped. PostgreSQL or Redis was unreachable, so the suite did not cover the database and session behavior."
+            exit 1
+          fi
+          echo "No skipped tests."
+
+  # The README tells a reviewer to run two commands. This job runs exactly those two
+  # commands on a clean checkout, so the documented path cannot rot unnoticed.
+  quickstart:
+    name: Quickstart (docker compose)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate .env the way the README says to
+        run: bash scripts/bootstrap.sh
+
+      # --wait blocks until every service with a healthcheck reports healthy, so this
+      # also exercises the Postgres and Redis healthchecks rather than just starting them.
+      - name: docker compose up --build
+        run: docker compose up --build -d --wait --wait-timeout 180
+
+      - name: Show service state
+        run: docker compose ps
+
+      # db/init only runs the first time the data volume is created. If this breaks, the
+      # test database silently stops existing and every database test would skip.
+      - name: db/init created the disposable test database
+        run: |
+          docker compose exec -T db psql -U auth_app -d postgres -lqt \
+            | cut -d '|' -f1 | grep -qw auth_test
+          echo "auth_test exists"
+
+      - name: Full suite inside the container
+        run: docker compose exec -T app pytest -q
+
+      - name: Liveness and readiness answer over the published port
+        run: |
+          curl -fsS localhost:8000/health
+          curl -fsS localhost:8000/ready
+
+      - name: Container logs (on failure only)
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
+
+  lint:
+    name: Lint and format
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      # The "S" rules are flake8-bandit: hardcoded secrets, SQL built by string
+      # formatting (S608), unsafe subprocess use. S608 is what keeps every query
+      # parameterized, so a lint failure here is a security failure.
+      - name: ruff check
+        run: python -m ruff check --output-format=github .
+
+      - name: ruff format
+        run: python -m ruff format --check .

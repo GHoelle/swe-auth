@@ -1,0 +1,24 @@
+version: 2
+
+# Dependencies are pinned to exact versions in requirements.txt, which makes builds
+# reproducible but means security patches have to be pulled in deliberately. Dependabot
+# is what keeps "pinned" from turning into "stale".
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # One PR for routine version bumps; anything with a known advisory still comes
+      # through separately as a security update, which is the one worth reading closely.
+      all-dependencies:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # The CI workflow pins actions by tag (actions/checkout@v4). A tag can be repointed at
+  # new code, so Phase 4 moves these to commit SHAs; until then Dependabot watches them.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
