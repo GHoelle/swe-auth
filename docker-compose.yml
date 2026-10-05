@@ -1,0 +1,68 @@
+# Local development stack: app + PostgreSQL + Redis.
+#
+# Security notes:
+# - Secrets come from .env (git-ignored). The `:?` syntax makes Compose refuse
+#   to start if a secret is missing, instead of silently using an empty password.
+# - Postgres and Redis are NOT published to the host. Only the app can reach them,
+#   over the private Compose network. Use `docker compose exec db psql ...` to debug.
+# - The app port is bound to 127.0.0.1, so other machines on your Wi-Fi can't reach it.
+
+services:
+  app:
+    build:
+      context: .
+      target: dev
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      DATABASE_URL: postgresql://${POSTGRES_USER:?set in .env}:${POSTGRES_PASSWORD:?set in .env}@db:5432/${POSTGRES_DB:?set in .env}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?set in .env}@redis:6379/0
+      # Used only by pytest. Points at the disposable auth_test database (db/init/002_test_database.sql).
+      TEST_DATABASE_URL: postgresql://${POSTGRES_USER:?set in .env}:${POSTGRES_PASSWORD:?set in .env}@db:5432/auth_test
+      SESSION_IDLE_TIMEOUT_SECONDS: ${SESSION_IDLE_TIMEOUT_SECONDS:-1800}
+      SESSION_ABSOLUTE_TIMEOUT_SECONDS: ${SESSION_ABSOLUTE_TIMEOUT_SECONDS:-28800}
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./app:/app/app
+      - ./tests:/app/tests
+      - ./db:/app/db:ro  # tests load the schema from here
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set in .env}
+    volumes:
+      # Scripts here run once, the first time the data volume is created.
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+      # Postgres 18 images keep data under /var/lib/postgresql.
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:8-alpine
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?set in .env}", "--appendonly", "yes"]
+    environment:
+      # Lets redis-cli authenticate in the healthcheck without putting the password on its command line.
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?set in .env}
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
+  redisdata:

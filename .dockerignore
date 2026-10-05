@@ -1,0 +1,11 @@
+# Keep secrets and junk out of the image build context.
+.env
+.env.*
+!.env.example
+.git
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache

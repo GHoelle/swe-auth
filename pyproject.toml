@@ -1,0 +1,23 @@
+[project]
+name = "swe-auth"
+version = "0.1.0"
+description = "Portfolio authentication service"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The cache provider is disabled because the container's non-root user can't write to mounted folders.
+addopts = "-ra -p no:cacheprovider"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# E/F: errors, I: import order, B: bugbear, UP: modern syntax,
+# S: flake8-bandit security checks (hardcoded secrets, SQL built with string formatting, etc.)
+select = ["E", "F", "I", "B", "UP", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests are allowed to use assert and hardcoded fake passwords.
+"tests/**" = ["S101", "S105", "S106"]

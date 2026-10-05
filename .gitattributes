@@ -1,0 +1,10 @@
+# Normalize all text files to LF in the repository and in the working tree.
+# The app runs in Linux containers; CRLF endings leaking into shell scripts,
+# SQL init files or entrypoints inside the image cause confusing failures.
+* text=auto eol=lf
+
+# Binary files Git must never touch.
+*.png binary
+*.jpg binary
+*.ico binary
+*.pdf binary
