@@ -70,7 +70,7 @@ jobs:
       # Pinning actions to a commit SHA rather than a tag is stronger (a tag can be
       # moved to new code); tracked as a Phase 4 supply-chain item alongside hash-locked
       # Python dependencies.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v5
         with:
@@ -113,7 +113,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Generate .env the way the README says to
         run: bash scripts/bootstrap.sh
@@ -155,7 +155,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v5
         with:
