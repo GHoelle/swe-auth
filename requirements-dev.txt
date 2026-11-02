@@ -1,6 +1,6 @@
 -r requirements.txt
-pytest==9.1.1
+pytest==9.2.0
 httpx==0.28.1
-ruff==0.16.8
+ruff==0.17.3
 # In-memory Redis for fast unit tests. Integration tests use the real Redis container.
-fakeredis==2.38.0
+fakeredis==2.40.0
